@@ -719,11 +719,34 @@ if [ $TODOTXT_PLAIN = 1 ]; then
     COLOR_DONE=$NONE
 fi
 
+hasContext() {
+    # Parameters:    $1: todo string.
+    # Returns:       1 if $1 containts a context, 0 otherwise.
+    SAVEIFS=$IFS
+    IFS=$' '
+    for word in $1 ; do
+        if [[ ( ${word:0:1} == @ ) || ( ${word:0:2} == -@ ) ]] ; then
+	    IFS=$SAVEIFS
+            return 1
+        fi
+    done
+    IFS=$SAVEIFS
+    return 0
+}
+
 _addto() {
     file="$1"
     input="$2"
     cleaninput
 
+    hasContext "$input"
+    if [[ ( $? -eq 0 ) && ( -n "$TODOTXT_DEFAULT_CONTEXTS" ) ]]; then
+        input="$input $TODOTXT_DEFAULT_CONTEXTS"
+    fi
+    # Remove occurences of null context (i.e., '@') because it
+    # is only used to disable the use of default contexts.
+    null_context=${TODOTXT_IGNORE_DEFAULT_CONTEXTS:-@}
+    input=$(echo "$input" | sed -e "s/^${null_context}  *//g" -e "s/  *${null_context}\$//g" -e "s/  *${null_context}\(  *\)/\1/g")
     if [[ $TODOTXT_DATE_ON_ADD = 1 ]]; then
         now=$(date '+%Y-%m-%d')
         input=$(echo "$input" | sed -e 's/^\(([A-Z]) \)\{0,1\}/\1'"$now /")
@@ -748,14 +771,19 @@ filtercommand()
     post_filter=${1:-}
     shift
 
+    null_context=${TODOTXT_IGNORE_DEFAULT_CONTEXTS:-@}
     for search_term
     do
         ## See if the first character of $search_term is a dash
         if [ "${search_term:0:1}" != '-' ]
         then
             ## First character isn't a dash: hide lines that don't match
-            ## this $search_term
-            filter="${filter:-}${filter:+ | }grep -i $(shellquote "$search_term")"
+            ## this $search_term unless it's a null context (i.e., '@'),
+            ## which is used to disable the use of default contexts.
+            if [ "$search_term" != "${null_context}" ]
+            then
+                filter="${filter:-}${filter:+ | }grep -i $(shellquote "$search_term")"
+            fi
         else
             ## First character is a dash: hide lines that match this
             ## $search_term
@@ -821,6 +849,11 @@ _format()
     ## Figure out how much padding we need to use, unless this was passed to us.
     PADDING=${1:-$(getPadding "$FILE")}
     shift
+
+    hasContext "$*"
+    if [[ ( $? -eq 0 ) && ( -n "$TODOTXT_DEFAULT_CONTEXTS" ) ]]; then
+        set -- "$@" $TODOTXT_DEFAULT_CONTEXTS
+    fi
 
     ## Number the file, then run the filter command,
     ## then sort and mangle output some more
